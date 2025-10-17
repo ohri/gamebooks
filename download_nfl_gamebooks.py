@@ -33,6 +33,8 @@ def get_current_nfl_week():
 parser = argparse.ArgumentParser(description='Download NFL gamebooks for a specific week')
 parser.add_argument('--week', '-w', type=int, default=None,
                     help='Week number to download (1-18). Defaults to current week.')
+parser.add_argument('--show-browser', action='store_true',
+                    help='Show browser window (runs headless by default)')
 args = parser.parse_args()
 
 # Determine week to download
@@ -50,6 +52,15 @@ os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 # Setup Chrome options
 chrome_options = Options()
+if not args.show_browser:
+    chrome_options.add_argument('--headless=new')
+    chrome_options.add_argument('--disable-gpu')
+    chrome_options.add_argument('--no-sandbox')
+    chrome_options.add_argument('--disable-dev-shm-usage')
+    print("Running in headless mode (browser window hidden)")
+else:
+    print("Running with visible browser window")
+
 prefs = {
     "download.default_directory": DOWNLOAD_DIR,
     "download.prompt_for_download": False,
@@ -61,6 +72,18 @@ chrome_options.add_experimental_option("prefs", prefs)
 # Initialize driver
 driver = webdriver.Chrome(options=chrome_options)
 wait = WebDriverWait(driver, 10)
+
+# Enable downloads in headless mode
+if not args.show_browser:
+    driver.command_executor._commands["send_command"] = ("POST", '/session/$sessionId/chromium/send_command')
+    params = {
+        'cmd': 'Page.setDownloadBehavior',
+        'params': {
+            'behavior': 'allow',
+            'downloadPath': DOWNLOAD_DIR
+        }
+    }
+    driver.execute("send_command", params)
 
 try:
     # Step 1: Login
@@ -116,18 +139,39 @@ try:
             driver.execute_script("arguments[0].click();", reg_button)
             time.sleep(1)
             print("  Clicked on REG tab")
-    except:
-        print("  REG tab already selected or not found")
+    except Exception as e:
+        print(f"  REG tab already selected or not found: {e}")
 
     # Find and click the week number (it's a div element with data-bind)
+    # Try multiple selector strategies
+    week_clicked = False
     try:
-        week_selector = wait.until(EC.element_to_be_clickable((By.XPATH, f"//div[@data-bind and text()='{week_number}']")))
+        # Strategy 1: Find by data-bind attribute and text content
+        week_selector = driver.find_element(By.XPATH, f"//div[contains(@data-bind, 'weekText') and normalize-space(text())='{week_number}']")
+        driver.execute_script("arguments[0].scrollIntoView(true);", week_selector)
+        time.sleep(0.5)
         driver.execute_script("arguments[0].click();", week_selector)
         print(f"  Clicked on Week {week_number}")
+        week_clicked = True
         time.sleep(2)
-    except Exception as e:
-        print(f"  Warning: Could not find week selector for week {week_number}: {e}")
-        print("  Continuing with current page...")
+    except Exception as e1:
+        print(f"  Strategy 1 failed: {e1}")
+        try:
+            # Strategy 2: Find any div with the week number as text in the week selector area
+            week_selector = driver.find_element(By.XPATH, f"//div[contains(@class, 'week') or contains(@data-bind, 'week')]//*[text()='{week_number}']")
+            driver.execute_script("arguments[0].scrollIntoView(true);", week_selector)
+            time.sleep(0.5)
+            driver.execute_script("arguments[0].click();", week_selector)
+            print(f"  Clicked on Week {week_number} (strategy 2)")
+            week_clicked = True
+            time.sleep(2)
+        except Exception as e2:
+            print(f"  Strategy 2 failed: {e2}")
+            print(f"  Warning: Could not find or click week selector for week {week_number}")
+            print("  Continuing with current page...")
+
+    if not week_clicked:
+        print(f"  ERROR: Failed to select Week {week_number}. The script may download the wrong week's games!")
 
     # Debug: Save page source to file
     with open("page_source.html", "w", encoding="utf-8") as f:
