@@ -1,0 +1,24 @@
+# Downloaded PDFs and week directories
+w*/
+nfl_gamebooks/
+
+# Debug files
+page_source.html
+error_screenshot.png
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
