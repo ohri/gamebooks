@@ -13,6 +13,7 @@ import os
 import glob
 import argparse
 from datetime import datetime, timedelta
+import re
 
 def get_current_nfl_week():
     """Calculate current NFL week based on season start date."""
@@ -45,7 +46,7 @@ print(f"Downloading gamebooks for Week {week_number}")
 LOGIN_URL = "https://nflgsis.com/GameStatsLive/Auth/?ReturnUrl=%2FGameStatsLive%2F"
 USERNAME = "media"
 PASSWORD = "media"
-DOWNLOAD_DIR = os.path.join(os.getcwd(), f"w{week_number}")
+DOWNLOAD_DIR = os.getcwd()
 
 # Create download directory if it doesn't exist
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
@@ -139,8 +140,8 @@ try:
             driver.execute_script("arguments[0].click();", reg_button)
             time.sleep(1)
             print("  Clicked on REG tab")
-    except Exception as e:
-        print(f"  REG tab already selected or not found: {e}")
+    except Exception:
+        pass  # REG tab already selected or not found
 
     # Find and click the week number (it's a div element with data-bind)
     # Try multiple selector strategies
@@ -173,11 +174,6 @@ try:
     if not week_clicked:
         print(f"  ERROR: Failed to select Week {week_number}. The script may download the wrong week's games!")
 
-    # Debug: Save page source to file
-    with open("page_source.html", "w", encoding="utf-8") as f:
-        f.write(driver.page_source)
-    print("Saved page source to page_source.html for debugging")
-
     # Step 3: Find and download all gamebook PDFs
     print("Finding game panels...")
 
@@ -193,6 +189,14 @@ try:
             break
 
         panel = game_panels[i]
+
+        # Skip BYE Teams panel
+        try:
+            if "BYE Teams" in panel.text:
+                print(f"\nSkipping BYE Teams panel")
+                continue
+        except Exception:
+            pass
 
         # Extract team codes from the panel by looking at CSS classes
         try:
@@ -223,6 +227,56 @@ try:
         except Exception as e:
             game_name = f"game_{i+1}"
             print(f"\nProcessing game {i+1} (error extracting team names: {e})")
+
+        # Check if the game has already started by parsing game time
+        try:
+            game_time_elem = panel.find_element(By.CLASS_NAME, "rPhase")
+            game_time_text = game_time_elem.text.strip()
+            print(f"  Game time: {game_time_text}")
+
+            # Parse time format like "Thu - Oct 23 - 8:15 PM"
+            # Extract the date and time portions
+            match = re.match(r'[A-Za-z]+ - ([A-Za-z]+) (\d+) - (\d+):(\d+) ([AP]M)', game_time_text)
+            if match:
+                month_str, day_str, hour_str, minute_str, ampm = match.groups()
+
+                # Convert month name to number
+                month_map = {
+                    'Jan': 1, 'Feb': 2, 'Mar': 3, 'Apr': 4, 'May': 5, 'Jun': 6,
+                    'Jul': 7, 'Aug': 8, 'Sep': 9, 'Oct': 10, 'Nov': 11, 'Dec': 12
+                }
+                month = month_map.get(month_str)
+                day = int(day_str)
+                hour = int(hour_str)
+                minute = int(minute_str)
+
+                # Convert to 24-hour format
+                if ampm == 'PM' and hour != 12:
+                    hour += 12
+                elif ampm == 'AM' and hour == 12:
+                    hour = 0
+
+                # Assume current year (NFL season may span two calendar years)
+                current_year = datetime.now().year
+                # If we're in January and the game is in Dec, use previous year
+                if datetime.now().month == 1 and month == 12:
+                    game_year = current_year - 1
+                # If we're in Dec and the game is in Jan, use next year
+                elif datetime.now().month == 12 and month == 1:
+                    game_year = current_year + 1
+                else:
+                    game_year = current_year
+
+                game_datetime = datetime(game_year, month, day, hour, minute)
+                current_time = datetime.now()
+
+                if game_datetime > current_time:
+                    print(f"  Game hasn't started yet (starts at {game_datetime}), skipping...")
+                    continue
+            else:
+                print(f"  Could not parse game time, attempting download anyway...")
+        except Exception as e:
+            print(f"  Could not find/parse game time ({e}), attempting download anyway...")
 
         # Find the GAME BOOK button within this panel
         try:
