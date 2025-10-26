@@ -35,6 +35,8 @@ parser.add_argument('--week', '-w', type=int, default=None,
                     help='Week number to download (1-18). Defaults to current week.')
 parser.add_argument('--show-browser', action='store_true',
                     help='Show browser window (runs headless by default)')
+parser.add_argument('--force', '-f', action='store_true',
+                    help='Force download even if PDF already exists')
 args = parser.parse_args()
 
 # Determine week to download
@@ -223,6 +225,12 @@ try:
         except Exception as e:
             game_name = f"game_{i+1}"
             print(f"\nProcessing game {i+1} (error extracting team names: {e})")
+
+        # Check if PDF already exists
+        expected_filename = os.path.join(DOWNLOAD_DIR, f"{game_name}.pdf")
+        if os.path.exists(expected_filename) and not args.force:
+            print(f"  PDF already exists: {game_name}.pdf (skipping)")
+            continue
 
         # Find the GAME BOOK button within this panel
         try:
